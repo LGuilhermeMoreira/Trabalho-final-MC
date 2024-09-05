@@ -3,6 +3,8 @@ import random
 import time
 from ortools.linear_solver import pywraplp
 
+print("init")
+
 # Função para ler a instância
 def ler_instancia(caminho_arquivo):
     with open(caminho_arquivo, 'r') as f:
