@@ -1,32 +1,16 @@
-import networkx as nx
-import random
-import itertools
 import time
 from ortools.linear_solver import pywraplp
-
-def criar_grafo_exemplo():
-    # Criar um grafo simples com 6 nós e algumas arestas com pesos
-    G = nx.Graph()
-    edges = [
-        (0, 1, 4), (0, 2, 3), (1, 2, 2), (1, 3, 5), 
-        (2, 3, 7), (2, 4, 6), (3, 4, 2), (3, 5, 8)
-    ]
-    for u, v, weight in edges:
-        G.add_edge(u, v, weight=weight)
-    
-    # Definir os vértices centrais e seus graus mínimos
-    centrais = {0: 2, 3: 2}
-    return G, centrais
+import networkx as nx
+import itertools
 
 def eliminacao_ciclos(G, centrais):    
-    # Cria um solver
     solver = pywraplp.Solver.CreateSolver('SCIP')
 
     # Cria as variáveis de decisão
     x = {}
     for u, v in G.edges():
         x[u, v] = solver.IntVar(0, 1, f'x[{u},{v}]')
-        x[v,u] = x[u,v]  # arestas não direcionadas
+        x[v, u] = x[u, v]  # Arestas não direcionadas
 
     # Define a função objetivo (minimizar peso total)
     objective = solver.Objective()
@@ -65,27 +49,80 @@ def eliminacao_ciclos(G, centrais):
             for u in G.neighbors(v):
                 constraint.SetCoefficient(x[u, v], 1)
 
-
     solver.set_time_limit(600000)  # Limite de tempo de 10 minutos (600.000 milissegundos)
 
     # Resolve o problema
+    start_time = time.time()
     status = solver.Solve()
+    end_time = time.time()
 
     # Verifica se a solução é ótima
     if status == pywraplp.Solver.OPTIMAL:
-        # Extrai a solução e constrói a árvore geradora
-        T = nx.Graph()
-        for u, v in G.edges():
-            if x[u, v].solution_value() == 1:
-                T.add_edge(u, v)
-        return T, solver.WallTime()
-    elif status == pywraplp.Solver.INFEASIBLE:
-        print('O problema é inviável.')
-        return None, solver.WallTime()
+        print('Solução ótima encontrada.')
     else:
         print('A solução não é ótima.')
-        return None, solver.WallTime()
     
+    return solver.WallTime()
+
+def rotulacao_vertices(G, centrais):
+
+    solver = pywraplp.Solver.CreateSolver('SCIP')
+
+    # Seleciona a raiz como o vértice central com o menor número de vizinhos
+    root = min(centrais, key=lambda v: len(list(G.neighbors(v))))
+
+    # Variáveis de decisão
+    x = {}
+    for u, v in G.edges():
+        x[u, v] = solver.IntVar(0, 1, f'x[{u},{v}]')
+        x[v, u] = x[u, v]  # Arestas não direcionadas
+
+    u = {}
+    for v in G.nodes():
+        u[v] = solver.IntVar(1, len(G.nodes()) - 1, f'u[{v}]')
+
+    # Função objetivo
+    objective = solver.Objective()
+    for i, j in G.edges():
+        objective.SetCoefficient(x[i, j], G[i][j]['weight'])
+    objective.SetMinimization()
+
+    # Restrições
+    # Cada vértice (exceto a raiz) tem exatamente um arco de entrada
+    for v in set(centrais.keys()) - {root}:
+        solver.Add(sum(x[(i, v)] for i in G.neighbors(v) if (i, v) in x) == 1)
+
+    # Grau mínimo para vértices centrais
+    for v in centrais:
+        solver.Add(sum(x[(i, v)] for i in G.neighbors(v) if (i, v) in x) >= 1)
+
+    # Restrições MTZ para evitar ciclos
+    for i, j in G.edges():
+        if i != root and j != root:
+            solver.Add(u[i] - u[j] + len(G.nodes()) * x[(i, j)] <= len(G.nodes()) - 1)
+            solver.Add(u[j] - u[i] + len(G.nodes()) * (1 - x[(i, j)]) <= len(G.nodes()) - 1)
+
+    # Restrição para o rótulo da raiz
+    solver.Add(u[root] == 0)
+
+    # Limites para os rótulos
+    for v in G.nodes():
+        solver.Add(u[v] >= 1)
+        solver.Add(u[v] <= len(G.nodes()) - 1)
+
+    # Resolve o problema
+    start_time = time.time()
+    status = solver.Solve()
+    end_time = time.time()
+    
+    if status == pywraplp.Solver.OPTIMAL:
+        print('A solução é ótima.')
+    else:
+        print('A solução não é ótima.')
+    
+    return  solver.WallTime()
+
+
 # Função para ler as instâncias do problema
 def ler_instancia(caminho_arquivo):
     with open(caminho_arquivo, 'r') as f:
@@ -116,12 +153,24 @@ def ler_instancia(caminho_arquivo):
     return G, centrais
 
 
-# path = "instancias/tb8ch30_0.txt"
+def criar_grafo_exemplo():
+    # Criar um grafo simples com 6 nós e algumas arestas com pesos
+    G = nx.Graph()
+    edges = [
+        (0, 1, 4), (0, 2, 3), (1, 2, 2), (1, 3, 5), 
+        (2, 3, 7), (2, 4, 6), (3, 4, 2), (3, 5, 8)
+    ]
+    for u, v, weight in edges:
+        G.add_edge(u, v, weight=weight)
+    
+    # Definir os vértices centrais e seus graus mínimos
+    centrais = {0: 2, 3: 2}
+    return G, centrais
+
+# Executar o código de exemplo
 G, centrais = criar_grafo_exemplo()
-# nx.draw(G, with_labels=True)
-T, tempo = eliminacao_ciclos(G, centrais)
-
-if T is not None:
-    nx.draw(T, with_labels=True)
-
-print(f'Tempo de execução: {tempo:.2f} segundos')
+nx.draw(G, with_labels=True)
+tempo = eliminacao_ciclos(G, centrais)
+print(f'Tempo de execução eliminação de ciclos: {tempo:.2f} segundos')
+tempo = rotulacao_vertices(G, centrais)
+print(f'Tempo de execução rotulação de vertices: {tempo:.2f} segundos')
