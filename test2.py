@@ -1,76 +1,127 @@
 import networkx as nx
 import random
+import itertools
 import time
+from ortools.linear_solver import pywraplp
 
-# Gerar um grafo aleatório com pesos nas arestas
-def generate_graph(n, p):
-    G = nx.gnp_random_graph(n, p)
-    for (u, v) in G.edges():
-        G.edges[u, v]['weight'] = random.randint(10, 500)
-    return G
-
-# Eliminação de Ciclos usando a Árvore Geradora Mínima
-def elimination_of_cycles(G):
-    # Gera a Árvore Geradora Mínima
-    mst = nx.minimum_spanning_tree(G, weight='weight')
-    return mst
-
-# Rótulos nos Vértices (baseado na formulação MTZ)
-def vertex_labels(G):
-    # Transformar o grafo em direcionado para a formulação de rótulos
-    D = nx.DiGraph()
-    for (u, v, data) in G.edges(data=True):
-        weight = data['weight']
-        D.add_edge(u, v, weight=weight)
-        D.add_edge(v, u, weight=weight)
-
-    # Escolhe um vértice raiz arbitrário
-    root = list(G.nodes())[0]
-
-    # Atribui rótulos para garantir que a ordem seja respeitada
-    labels = {node: float('inf') for node in G.nodes()}
-    labels[root] = 0
-
-    # Aplica restrições de rótulos (MTZ) para eliminar ciclos
-    for (u, v) in D.edges():
-        if labels[u] == float('inf'):
-            labels[u] = labels[v] + 1
-        elif labels[v] == float('inf'):
-            labels[v] = labels[u] + 1
+def criar_grafo_exemplo():
+    # Criar um grafo simples com 6 nós e algumas arestas com pesos
+    G = nx.Graph()
+    edges = [
+        (0, 1, 4), (0, 2, 3), (1, 2, 2), (1, 3, 5), 
+        (2, 3, 7), (2, 4, 6), (3, 4, 2), (3, 5, 8)
+    ]
+    for u, v, weight in edges:
+        G.add_edge(u, v, weight=weight)
     
-    # Constrói a árvore com base nos rótulos
-    tree = nx.DiGraph()
-    for (u, v) in D.edges():
-        if labels[u] < labels[v]:
-            tree.add_edge(u, v, weight=D.edges[u, v]['weight'])
+    # Definir os vértices centrais e seus graus mínimos
+    centrais = {0: 2, 3: 2}
+    return G, centrais
 
-    return tree
+def eliminacao_ciclos(G, centrais):    
+    # Cria um solver
+    solver = pywraplp.Solver.CreateSolver('SCIP')
 
-# Função para comparar as formulações
-def compare_formulations(n, p):
-    G = generate_graph(n, p)
+    # Cria as variáveis de decisão
+    x = {}
+    for u, v in G.edges():
+        x[u, v] = solver.IntVar(0, 1, f'x[{u},{v}]')
+        x[v,u] = x[u,v]  # arestas não direcionadas
+
+    # Define a função objetivo (minimizar peso total)
+    objective = solver.Objective()
+    for u, v in G.edges():
+        objective.SetCoefficient(x[u, v], G[u][v]['weight'])
+    objective.SetMinimization()
+
+    # Adiciona as restrições
+    # Restrição 1: Eliminação de ciclos
+    for C in nx.cycle_basis(G):
+        constraint = solver.Constraint(len(C) - 1, len(C) - 1)
+        added_edges = set()
+        for u, v in G.subgraph(C).edges():
+            if (u, v) not in added_edges:
+                constraint.SetCoefficient(x[u, v], 1)
+                added_edges.add((u, v))
+
+    # Restrição 2: Limitação de grau para subconjuntos de vértices
+    for S in itertools.combinations(G.nodes(), 2):
+        constraint = solver.Constraint(0, len(S) - 1)
+        for u, v in G.edges():
+            if u in S and v in S:
+                constraint.SetCoefficient(x[u, v], 1)
+
+    # Restrição 3: Grau mínimo para vértices centrais
+    for v, degree in centrais.items():
+        constraint = solver.Constraint(degree, solver.infinity())
+        for u in G.neighbors(v):
+            constraint.SetCoefficient(x[u, v], 1)
+
+    # Restrição 4: Uma aresta incidente por terminal (exceto a raiz)
+    root = min(centrais, key=lambda v: len(list(G.neighbors(v))))
+    for v in centrais:
+        if v != root:
+            constraint = solver.Constraint(1, 1)
+            for u in G.neighbors(v):
+                constraint.SetCoefficient(x[u, v], 1)
+
+
+    solver.set_time_limit(600000)  # Limite de tempo de 10 minutos (600.000 milissegundos)
+
+    # Resolve o problema
+    status = solver.Solve()
+
+    # Verifica se a solução é ótima
+    if status == pywraplp.Solver.OPTIMAL:
+        # Extrai a solução e constrói a árvore geradora
+        T = nx.Graph()
+        for u, v in G.edges():
+            if x[u, v].solution_value() == 1:
+                T.add_edge(u, v)
+        return T, solver.WallTime()
+    elif status == pywraplp.Solver.INFEASIBLE:
+        print('O problema é inviável.')
+        return None, solver.WallTime()
+    else:
+        print('A solução não é ótima.')
+        return None, solver.WallTime()
     
-    # Eliminação de Ciclos
-    start_time = time.time()
-    mst1 = elimination_of_cycles(G)
-    time_ec = time.time() - start_time
-    
-    # Rótulos nos Vértices
-    start_time = time.time()
-    mst2 = vertex_labels(G)
-    time_vl = time.time() - start_time
-    
-    return time_ec, time_vl, mst1, mst2
+# Função para ler as instâncias do problema
+def ler_instancia(caminho_arquivo):
+    with open(caminho_arquivo, 'r') as f:
+        # Ler a primeira linha (n, nc, m)
+        primeira_linha = f.readline().strip().split()
+        n = int(primeira_linha[0])
+        nc = int(primeira_linha[1])
+        m = int(primeira_linha[2])
+        
+        # Inicializar o grafo
+        G = nx.Graph()
+        
+        # Ler os vértices centrais e seus graus mínimos
+        centrais = {}
+        for _ in range(nc):
+            linha = f.readline().strip().split()
+            vertice_central = int(linha[0])
+            grau_minimo = int(linha[1])
+            centrais[vertice_central] = grau_minimo
+        
+        # Ler as arestas e os custos
+        for _ in range(m):
+            linha = f.readline().strip().split()
+            i = int(linha[0])
+            j = int(linha[1])
+            custo = int(linha[2])
+            G.add_edge(i, j, weight=custo)   
+    return G, centrais
 
-# Comparação para diferentes valores de n e p
-def run_comparisons():
-    for n in range(10, 51, 10):
-        for p in [0.1, 0.3, 0.5]:
-            print(f"n = {n}, p = {p}")
-            time_ec, time_vl, mst1, mst2 = compare_formulations(n, p)
-            print(f"  Eliminação de Ciclos: {time_ec:.4f}s")
-            print(f"  Rótulos nos Vértices: {time_vl:.4f}s")
-            print('-' * 40)
 
-if __name__ == "__main__":
-    run_comparisons()
+# path = "instancias/tb8ch30_0.txt"
+G, centrais = criar_grafo_exemplo()
+# nx.draw(G, with_labels=True)
+T, tempo = eliminacao_ciclos(G, centrais)
+
+if T is not None:
+    nx.draw(T, with_labels=True)
+
+print(f'Tempo de execução: {tempo:.2f} segundos')
