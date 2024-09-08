@@ -1,9 +1,11 @@
 Deve implementar as formulações Eliminação de ciclos e Rótulos nos vértices;
-Usa a biblioteca NetworkX para gerar grafos, usando gnp_random_graph(n, p) e depois random.randint(10, 500) para inserir os pesos nas arestas.
+Usa a biblioteca NetworkX para gerar grafos, usando gnp_random_graph(n, p) e depois random.randint(10, 500) 
+para inserir os pesos nas arestas.
 
 Usem as instâncias disponibilizadas. 
 
-Gere um notebook python contendo as comparações entre as duas formulações. As comparações serão feitas pelo tamanho do grafo e sua densidade. 
+Gere um notebook python contendo as comparações entre as duas formulações. 
+As comparações serão feitas pelo tamanho do grafo e sua densidade. 
 
 Tempo máximo de execução será de 30 minutos.
 

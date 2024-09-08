@@ -6,7 +6,6 @@ from ortools.linear_solver import pywraplp
 
 print("init")
 
-# Função para ler a instância
 def ler_instancia(caminho_arquivo):
     with open(caminho_arquivo, 'r') as f:
         # Ler a primeira linha (n, nc, m)
@@ -36,7 +35,7 @@ def ler_instancia(caminho_arquivo):
     
     return G, centrais
 
-def eliminacao_ciclos(G, centrais):
+def eliminacao_ciclos(G, centrais): 
     # Criando o solver
     solver = pywraplp.Solver.CreateSolver('SCIP')
 
@@ -50,7 +49,7 @@ def eliminacao_ciclos(G, centrais):
         x[(v, u)] = solver.BoolVar(f'x_{v}_{u}')  # Para garantir a simetria das arestas (grafo não direcionado)
 
     # Função objetivo: minimizar o custo total das arestas selecionadas
-    solver.Minimize(solver.Sum(G[u][v]['weight'] * x[(u, v)] for u, v in G.edges()))
+    solver.Minimize(solver.Sum(G.edges()[u,v]["weight"] * x[(u, v)] for u, v in G.edges()))
 
     # Eliminação de ciclos (Subtour Elimination Constraints - SECs)
     # Para cada subconjunto de nós, garantir que o número de arestas seja <= |S| - 1
@@ -60,8 +59,9 @@ def eliminacao_ciclos(G, centrais):
             solver.Add(solver.Sum(x[(u, v)] for u, v in itertools.combinations(subset, 2) if G.has_edge(u, v)) <= len(subset) - 1)
 
     # Restrições de grau mínimo para os vértices centrais
-    for v, grau_minimo in centrais.items():
-        solver.Add(solver.Sum(x[(u, v)] for u, v in G.edges(v)) >= grau_minimo)
+    terminais = set(G.nodes()) - set(centrais.keys())
+    for terminal in terminais:
+        solver.Add(solver.Sum(x[terminal,v] for v in G.neighbors(terminal)) == 1)
 
     # Definir limite de tempo de execução
     solver.SetTimeLimit(1800000)  # 30 minutos em milissegundos
@@ -69,18 +69,15 @@ def eliminacao_ciclos(G, centrais):
     # Resolver o problema
     start_time = time.time()
     status = solver.Solve()
-    end_time = time.time()
+    final_time = time.time() - start_time
 
     if status == pywraplp.Solver.OPTIMAL:
         print("Solução ótima encontrada.")
-        solucao = [(u, v) for u, v in G.edges() if x[(u, v)].solution_value() > 0.5]
-        return solver.Objective().Value(), solucao, end_time - start_time
     else:
         print("Solução não encontrada ou tempo limite excedido.")
-        return None, None, end_time - start_time
+    
+    return final_time
 
-
-# Função de Rótulos nos Vértices
 def rotulos_vertices(G, centrais):
     solver = pywraplp.Solver.CreateSolver('SCIP')
 
@@ -91,6 +88,7 @@ def rotulos_vertices(G, centrais):
     y = {}
     for u, v in G.edges():
         y[(u, v)] = solver.BoolVar(f'y_{u}_{v}')  # Considerando o arco direcionado
+        y[(v, u)] = solver.BoolVar(f'y_{v}_{u}')  # Para garantir a simetria das arestas
 
     # Função objetivo: minimizar o custo total das arestas selecionadas
     solver.Minimize(solver.Sum(G[u][v]['weight'] * y[(u, v)] for u, v in G.edges()))
@@ -108,14 +106,14 @@ def rotulos_vertices(G, centrais):
     for u, v in G.edges():
         solver.Add(labels[u] - labels[v] + n * y[(u, v)] <= n - 1)
 
-    # Restrição de árvore geradora direcionada: cada nó (exceto a raiz) deve ter exatamente uma aresta entrando
+    # Restrição de árvore geradora: cada nó (exceto a raiz) deve ter exatamente uma aresta conectada
     for v in G.nodes():
         if v != root:
-            solver.Add(solver.Sum(y[u, v] for u in G.predecessors(v)) == 1)
+            solver.Add(solver.Sum(y.get((u, v), 0) for u in G.neighbors(v)) == 1)
 
     # Restrições de grau mínimo para os vértices centrais
     for v, grau_minimo in centrais.items():
-        solver.Add(solver.Sum(y[(u, v)] for u, v in G.edges(v)) >= grau_minimo)
+        solver.Add(solver.Sum(y.get((u, v), 0) + y.get((v, u), 0) for u in G.neighbors(v)) >= grau_minimo)
 
     # Definir limite de tempo de execução
     solver.SetTimeLimit(1800000)  # 30 minutos em milissegundos
@@ -133,6 +131,7 @@ def rotulos_vertices(G, centrais):
         return None, end_time - start_time
 
 
+
 # Função para comparação entre as formulações
 def comparar_formulacoes(caminho_arquivo):
     # Ler a instância
@@ -141,17 +140,25 @@ def comparar_formulacoes(caminho_arquivo):
     print(f"Comparando formulações para instância {caminho_arquivo}")
     
     # Eliminação de Ciclos
-    obj,solucao,tempo_eliminacao_ciclos = eliminacao_ciclos(G, centrais)
+    tempo_eliminacao_ciclos = eliminacao_ciclos(G, centrais)
     print(f"Tempo Eliminação de Ciclos: {tempo_eliminacao_ciclos:.2f} segundos")
     
-    # Rótulos nos Vértices
-    obj,tempo_rotulos_vertices = rotulos_vertices(G, centrais)
-    print(f"Tempo Rótulos nos Vértices: {tempo_rotulos_vertices:.2f} segundos")
 
 # Exemplo de uso com as instâncias
-
 instancias = [
-    'instancias/tb8ch4_0.txt'
+    # "instancias/tb8ch4_0.txt",
+    # "instancias/tb8ch4_1.txt",
+    "instancias/tb8ch8_0.txt",
+    # "instancias/tb8ch8_1.txt",
+    # "instancias/tb8ch10_0.txt",
+    # "instancias/tb8ch10_1.txt",
+    # "instancias/tb8ch15_0.txt",
+    # "instancias/tb8ch15_1.txt",
+    # "instancias/tb8ch20_0.txt",
+    # "instancias/tb8ch25_0.txt",
+    # "instancias/tb8ch25_1.txt",
+    # "instancias/tb8ch30_0.txt",
+    # "instancias/tb8ch30_1.txt"
 ]
 
 for instancia in instancias:
